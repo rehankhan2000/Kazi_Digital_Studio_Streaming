@@ -1,0 +1,403 @@
+<!--
+  view.html - Peer-to-Peer Viewer Page
+  -----------------------------------------------------------------------------
+  This static HTML page allows a viewer user to enter a room password, hash it to
+  obtain the corresponding room ID, and connect to a streamer's P2P stream via WebRTC.
+  Signaling messages are exchanged over a free public MQTT WebSocket broker (EMQX).
+  No media server is used; video/audio/photo media streams directly browser-to-browser.
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>P2P Viewer - Watch Stream</title>
+
+  <!-- MQTT.js library from CDN -->
+  <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+
+  <style>
+    :root {
+      --bg-color: #0f172a;
+      --card-bg: #1e293b;
+      --accent-color: #3b82f6;
+      --accent-hover: #2563eb;
+      --text-color: #f8fafc;
+      --text-secondary: #94a3b8;
+      --border-color: #334155;
+      --success-color: #10b981;
+      --error-color: #ef4444;
+      --warning-color: #f59e0b;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background-color: var(--bg-color);
+      color: var(--text-color);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 2rem 1rem;
+    }
+
+    header {
+      text-align: center;
+      margin-bottom: 2rem;
+    }
+
+    header h1 {
+      font-size: 2rem;
+      margin-bottom: 0.5rem;
+      color: #fff;
+    }
+
+    header p {
+      color: var(--text-secondary);
+      font-size: 0.95rem;
+    }
+
+    .container {
+      width: 100%;
+      max-width: 650px;
+      background-color: var(--card-bg);
+      border: 1px solid var(--border-color);
+      border-radius: 12px;
+      padding: 1.5rem;
+      box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5);
+    }
+
+    .form-group {
+      margin-bottom: 1.25rem;
+    }
+
+    label {
+      display: block;
+      margin-bottom: 0.5rem;
+      font-weight: 600;
+      font-size: 0.9rem;
+      color: var(--text-secondary);
+    }
+
+    input[type="password"] {
+      width: 100%;
+      padding: 0.75rem;
+      border-radius: 8px;
+      border: 1px solid var(--border-color);
+      background-color: var(--bg-color);
+      color: var(--text-color);
+      font-size: 1rem;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+
+    input[type="password"]:focus {
+      border-color: var(--accent-color);
+    }
+
+    .btn {
+      width: 100%;
+      padding: 0.85rem;
+      background-color: var(--accent-color);
+      color: white;
+      border: none;
+      border-radius: 8px;
+      font-size: 1rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background-color 0.2s, opacity 0.2s;
+    }
+
+    .btn:hover {
+      background-color: var(--accent-hover);
+    }
+
+    .btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    .status-badge {
+      margin-top: 1rem;
+      padding: 0.75rem;
+      border-radius: 8px;
+      font-size: 0.9rem;
+      text-align: center;
+      display: none;
+    }
+
+    .status-info { background-color: rgba(59, 130, 246, 0.15); color: var(--accent-color); border: 1px solid rgba(59, 130, 246, 0.3); }
+    .status-success { background-color: rgba(16, 185, 129, 0.15); color: var(--success-color); border: 1px solid rgba(16, 185, 129, 0.3); }
+    .status-warning { background-color: rgba(245, 158, 11, 0.15); color: var(--warning-color); border: 1px solid rgba(245, 158, 11, 0.3); }
+    .status-error { background-color: rgba(239, 68, 68, 0.15); color: var(--error-color); border: 1px solid rgba(239, 68, 68, 0.3); }
+
+    .video-container {
+      margin-top: 1.5rem;
+      text-align: center;
+    }
+
+    video {
+      width: 100%;
+      max-height: 420px;
+      background-color: #000;
+      border-radius: 8px;
+      border: 1px solid var(--border-color);
+      object-fit: contain;
+    }
+
+    footer {
+      margin-top: auto;
+      padding-top: 2rem;
+      text-align: center;
+      color: var(--text-secondary);
+      font-size: 0.85rem;
+    }
+
+    footer a {
+      color: var(--accent-color);
+      text-decoration: none;
+    }
+
+    footer a:hover {
+      text-decoration: underline;
+    }
+  </style>
+</head>
+<body>
+
+  <header>
+    <h1>P2P Media Viewer</h1>
+    <p>Watch live P2P video/photo stream directly from the streamer</p>
+  </header>
+
+  <main class="container">
+    <!-- Password Input -->
+    <div class="form-group">
+      <label for="passwordInput">Room Password:</label>
+      <input type="password" id="passwordInput" placeholder="Enter the room password set by streamer">
+    </div>
+
+    <!-- Watch Button -->
+    <button id="watchBtn" class="btn" disabled>Watch Stream</button>
+
+    <!-- Connection Status Badge -->
+    <div id="statusBadge" class="status-badge"></div>
+
+    <!-- Remote Stream Video Display -->
+    <div class="video-container">
+      <label>Remote P2P Stream:</label>
+      <video id="remoteVideo" autoplay playsinline controls></video>
+    </div>
+  </main>
+
+  <footer>
+    <p><a href="index.html">← Home</a> &nbsp;|&nbsp; Switch to <a href="stream.html">Streamer Page (stream.html)</a></p>
+  </footer>
+
+  <script>
+    // --- Global Configuration & State ---
+    const MQTT_BROKER = 'wss://broker.emqx.io:8084/mqtt';
+    const STUN_SERVER = 'stun:stun.l.google.com:19302';
+
+    // Unique client ID for this viewer session
+    const clientId = 'viewer-' + Math.random().toString(36).substring(2, 10);
+
+    let peerConnection = null;
+    let mqttClient = null;
+    let roomId = null;
+
+    // DOM Elements
+    const passwordInput = document.getElementById('passwordInput');
+    const watchBtn = document.getElementById('watchBtn');
+    const statusBadge = document.getElementById('statusBadge');
+    const remoteVideo = document.getElementById('remoteVideo');
+
+    // --- Helper Functions ---
+
+    /**
+     * Updates UI status indicator message and color styling.
+     */
+    function updateStatus(message, type = 'info') {
+      statusBadge.style.display = 'block';
+      statusBadge.className = `status-badge status-${type}`;
+      statusBadge.textContent = message;
+    }
+
+    /**
+     * Hashes the room password using SHA-256 to generate the first 32 hex characters.
+     * Must match the streamer's computed room ID.
+     * @param {string} password 
+     * @returns {Promise<string>} 32-character hex Room ID
+     */
+    async function getRoomId(password) {
+      const encoder = new TextEncoder();
+      const data = encoder.encode(password);
+      const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+      const hashArray = Array.from(new Uint8Array(hashBuffer));
+      const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+      return hashHex.substring(0, 32);
+    }
+
+    /**
+     * Waits for the RTCPeerConnection ICE gathering state to complete so all candidate info
+     * is bundled into the local SDP answer.
+     * @param {RTCPeerConnection} pc 
+     * @returns {Promise<void>}
+     */
+    function waitForIceComplete(pc) {
+      return new Promise((resolve) => {
+        if (pc.iceGatheringState === 'complete') {
+          resolve();
+          return;
+        }
+
+        // Safety timeout of 10 seconds in case STUN resolution takes longer
+        const timeoutId = setTimeout(() => {
+          pc.removeEventListener('icegatheringstatechange', checkState);
+          resolve();
+        }, 10000);
+
+        function checkState() {
+          if (pc.iceGatheringState === 'complete') {
+            clearTimeout(timeoutId);
+            pc.removeEventListener('icegatheringstatechange', checkState);
+            resolve();
+          }
+        }
+
+        pc.addEventListener('icegatheringstatechange', checkState);
+      });
+    }
+
+    /**
+     * Enables or disables the "Watch" button based on password input.
+     */
+    passwordInput.addEventListener('input', () => {
+      watchBtn.disabled = passwordInput.value.trim().length === 0;
+    });
+
+    // --- "Watch" Stream Workflow ---
+    watchBtn.addEventListener('click', async () => {
+      const password = passwordInput.value.trim();
+      if (!password) {
+        updateStatus('Please enter the room password.', 'warning');
+        return;
+      }
+
+      watchBtn.disabled = true;
+      passwordInput.disabled = true;
+
+      try {
+        updateStatus('Computing Room ID...', 'info');
+        roomId = await getRoomId(password);
+
+        updateStatus(`Connecting to MQTT broker (${MQTT_BROKER})...`, 'info');
+        
+        // Connect to public MQTT WebSocket broker
+        mqttClient = mqtt.connect(MQTT_BROKER, { clientId: clientId });
+
+        mqttClient.on('connect', () => {
+          updateStatus('Connected to MQTT broker. Subscribing for streamer offer...', 'info');
+
+          // Subscribe to streamer topic to receive retained offer
+          const streamerTopic = `myapp/${roomId}/streamer`;
+          mqttClient.subscribe(streamerTopic, (err) => {
+            if (err) {
+              updateStatus(`Failed to subscribe to topic: ${err.message}`, 'error');
+            }
+          });
+        });
+
+        // Instantiate RTCPeerConnection with STUN server
+        peerConnection = new RTCPeerConnection({
+          iceServers: [{ urls: STUN_SERVER }]
+        });
+
+        // When remote stream tracks are received, attach stream to remote video element
+        peerConnection.ontrack = (event) => {
+          console.log('Received remote track:', event.track);
+          if (event.streams && event.streams[0]) {
+            remoteVideo.srcObject = event.streams[0];
+            remoteVideo.play().catch(e => console.log('Autoplay notice:', e));
+            updateStatus('Connected! Streaming media directly from streamer.', 'success');
+          }
+        };
+
+        // Handle WebRTC connection state changes
+        peerConnection.oniceconnectionstatechange = () => {
+          console.log('ICE Connection State:', peerConnection.iceConnectionState);
+          if (peerConnection.iceConnectionState === 'connected') {
+            updateStatus('P2P Connection Established! Playing media stream.', 'success');
+          } else if (peerConnection.iceConnectionState === 'disconnected' || peerConnection.iceConnectionState === 'failed') {
+            updateStatus('Streamer disconnected or connection failed.', 'warning');
+          }
+        };
+
+        // Handle incoming signaling messages from streamer
+        mqttClient.on('message', async (topic, message) => {
+          if (topic === `myapp/${roomId}/streamer`) {
+            try {
+              const data = JSON.parse(message.toString());
+
+              if (data.type === 'offer' && data.sdp) {
+                console.log('Received WebRTC Offer from streamer');
+
+                // Check signaling state to avoid duplicate processing
+                if (peerConnection.signalingState === 'stable' || peerConnection.signalingState === 'have-remote-offer') {
+                  updateStatus('Processing streamer offer...', 'info');
+
+                  // Set remote description received from streamer
+                  await peerConnection.setRemoteDescription(new RTCSessionDescription(data.sdp));
+
+                  // Create local answer
+                  const answer = await peerConnection.createAnswer();
+                  await peerConnection.setLocalDescription(answer);
+
+                  updateStatus('Gathering ICE candidates...', 'info');
+                  await waitForIceComplete(peerConnection);
+
+                  // Prepare answer payload
+                  const viewerTopic = `myapp/${roomId}/viewer`;
+                  const answerPayload = JSON.stringify({
+                    type: 'answer',
+                    from: clientId,
+                    sdp: peerConnection.localDescription
+                  });
+
+                  // Publish answer to viewer topic
+                  mqttClient.publish(viewerTopic, answerPayload, { qos: 1 }, (err) => {
+                    if (err) {
+                      updateStatus(`Failed to send answer: ${err.message}`, 'error');
+                    } else {
+                      updateStatus('Answer sent to streamer. Establishing P2P stream...', 'info');
+                    }
+                  });
+                }
+              }
+            } catch (err) {
+              console.error('Failed to parse MQTT message:', err);
+            }
+          }
+        });
+
+        mqttClient.on('error', (err) => {
+          console.error('MQTT Error:', err);
+          updateStatus(`MQTT Broker Error: ${err.message}`, 'error');
+        });
+
+      } catch (err) {
+        console.error('Watch stream error:', err);
+        updateStatus(`Failed to watch stream: ${err.message}`, 'error');
+        watchBtn.disabled = false;
+        passwordInput.disabled = false;
+      }
+    });
+  </script>
+</body>
+</html>

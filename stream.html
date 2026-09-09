@@ -1,0 +1,482 @@
+<!--
+  stream.html - Peer-to-Peer Streamer Page
+  -----------------------------------------------------------------------------
+  This static HTML page allows a streamer user to select a local video or photo file,
+  hash a password to generate a unique room ID, and stream the media directly to a viewer
+  using WebRTC. Signaling is handled via a free public MQTT broker (EMQX) over WebSockets.
+  No media server is used; all video/photo data flows directly browser-to-browser.
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>P2P Streamer - Share Video / Photo</title>
+
+  <!-- MQTT.js library from CDN -->
+  <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+
+  <style>
+    :root {
+      --bg-color: #0f172a;
+      --card-bg: #1e293b;
+      --accent-color: #3b82f6;
+      --accent-hover: #2563eb;
+      --text-color: #f8fafc;
+      --text-secondary: #94a3b8;
+      --border-color: #334155;
+      --success-color: #10b981;
+      --error-color: #ef4444;
+      --warning-color: #f59e0b;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background-color: var(--bg-color);
+      color: var(--text-color);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 2rem 1rem;
+    }
+
+    header {
+      text-align: center;
+      margin-bottom: 2rem;
+    }
+
+    header h1 {
+      font-size: 2rem;
+      margin-bottom: 0.5rem;
+      color: #fff;
+    }
+
+    header p {
+      color: var(--text-secondary);
+      font-size: 0.95rem;
+    }
+
+    .container {
+      width: 100%;
+      max-width: 650px;
+      background-color: var(--card-bg);
+      border: 1px solid var(--border-color);
+      border-radius: 12px;
+      padding: 1.5rem;
+      box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5);
+    }
+
+    .form-group {
+      margin-bottom: 1.25rem;
+    }
+
+    label {
+      display: block;
+      margin-bottom: 0.5rem;
+      font-weight: 600;
+      font-size: 0.9rem;
+      color: var(--text-secondary);
+    }
+
+    input[type="file"],
+    input[type="password"] {
+      width: 100%;
+      padding: 0.75rem;
+      border-radius: 8px;
+      border: 1px solid var(--border-color);
+      background-color: var(--bg-color);
+      color: var(--text-color);
+      font-size: 1rem;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+
+    input[type="password"]:focus {
+      border-color: var(--accent-color);
+    }
+
+    .btn {
+      width: 100%;
+      padding: 0.85rem;
+      background-color: var(--accent-color);
+      color: white;
+      border: none;
+      border-radius: 8px;
+      font-size: 1rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background-color 0.2s, opacity 0.2s;
+    }
+
+    .btn:hover {
+      background-color: var(--accent-hover);
+    }
+
+    .btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    .status-badge {
+      margin-top: 1rem;
+      padding: 0.75rem;
+      border-radius: 8px;
+      font-size: 0.9rem;
+      text-align: center;
+      display: none;
+    }
+
+    .status-info { background-color: rgba(59, 130, 246, 0.15); color: var(--accent-color); border: 1px solid rgba(59, 130, 246, 0.3); }
+    .status-success { background-color: rgba(16, 185, 129, 0.15); color: var(--success-color); border: 1px solid rgba(16, 185, 129, 0.3); }
+    .status-warning { background-color: rgba(245, 158, 11, 0.15); color: var(--warning-color); border: 1px solid rgba(245, 158, 11, 0.3); }
+    .status-error { background-color: rgba(239, 68, 68, 0.15); color: var(--error-color); border: 1px solid rgba(239, 68, 68, 0.3); }
+
+    .preview-container {
+      margin-top: 1.5rem;
+      text-align: center;
+    }
+
+    video {
+      width: 100%;
+      max-height: 380px;
+      background-color: #000;
+      border-radius: 8px;
+      border: 1px solid var(--border-color);
+      object-fit: contain;
+    }
+
+    footer {
+      margin-top: auto;
+      padding-top: 2rem;
+      text-align: center;
+      color: var(--text-secondary);
+      font-size: 0.85rem;
+    }
+
+    footer a {
+      color: var(--accent-color);
+      text-decoration: none;
+    }
+
+    footer a:hover {
+      text-decoration: underline;
+    }
+  </style>
+</head>
+<body>
+
+  <header>
+    <h1>P2P Media Streamer</h1>
+    <p>Stream local video or photos directly to another browser via WebRTC</p>
+  </header>
+
+  <main class="container">
+    <!-- File Input for Video or Photo -->
+    <div class="form-group">
+      <label for="fileInput">Select Video or Photo File:</label>
+      <input type="file" id="fileInput" accept="video/*,image/*">
+    </div>
+
+    <!-- Password Input for Room ID derivation -->
+    <div class="form-group">
+      <label for="passwordInput">Room Password:</label>
+      <input type="password" id="passwordInput" placeholder="Enter a secret password">
+    </div>
+
+    <!-- Action Button -->
+    <button id="goLiveBtn" class="btn" disabled>Go Live</button>
+
+    <!-- Connection Status Badge -->
+    <div id="statusBadge" class="status-badge"></div>
+
+    <!-- Local Media Preview -->
+    <div class="preview-container">
+      <label>Local Stream Preview:</label>
+      <video id="previewVideo" autoplay playsinline muted controls></video>
+    </div>
+  </main>
+
+  <!-- Hidden elements used for background media processing -->
+  <video id="hiddenVideo" style="display:none;" loop muted playsinline></video>
+  <canvas id="imageCanvas" style="display:none;"></canvas>
+
+  <footer>
+    <p><a href="index.html">← Home</a> &nbsp;|&nbsp; Switch to <a href="view.html">Viewer Page (view.html)</a></p>
+  </footer>
+
+  <script>
+    // --- Global Configuration & State ---
+    const MQTT_BROKER = 'wss://broker.emqx.io:8084/mqtt';
+    const STUN_SERVER = 'stun:stun.l.google.com:19302';
+    
+    // Generate a unique client ID for this streamer session
+    const clientId = 'streamer-' + Math.random().toString(36).substring(2, 10);
+
+    let localStream = null;
+    let peerConnection = null;
+    let mqttClient = null;
+    let roomId = null;
+    let imageIntervalId = null;
+
+    // DOM Elements
+    const fileInput = document.getElementById('fileInput');
+    const passwordInput = document.getElementById('passwordInput');
+    const goLiveBtn = document.getElementById('goLiveBtn');
+    const statusBadge = document.getElementById('statusBadge');
+    const previewVideo = document.getElementById('previewVideo');
+    const hiddenVideo = document.getElementById('hiddenVideo');
+    const imageCanvas = document.getElementById('imageCanvas');
+
+    // --- Helper Functions ---
+
+    /**
+     * Updates the UI status message with a given message and style category.
+     */
+    function updateStatus(message, type = 'info') {
+      statusBadge.style.display = 'block';
+      statusBadge.className = `status-badge status-${type}`;
+      statusBadge.textContent = message;
+    }
+
+    /**
+     * Hashes the room password using SHA-256 and extracts the first 32 hex characters.
+     * @param {string} password 
+     * @returns {Promise<string>} 32-character hex Room ID
+     */
+    async function getRoomId(password) {
+      const encoder = new TextEncoder();
+      const data = encoder.encode(password);
+      const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+      const hashArray = Array.from(new Uint8Array(hashBuffer));
+      const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+      return hashHex.substring(0, 32);
+    }
+
+    /**
+     * Waits for the RTCPeerConnection ICE gathering state to complete so all candidate info
+     * is bundled inside the local SDP offer.
+     * @param {RTCPeerConnection} pc 
+     * @returns {Promise<void>}
+     */
+    function waitForIceComplete(pc) {
+      return new Promise((resolve) => {
+        if (pc.iceGatheringState === 'complete') {
+          resolve();
+          return;
+        }
+
+        // Safety timeout of 10 seconds in case STUN resolution takes longer
+        const timeoutId = setTimeout(() => {
+          pc.removeEventListener('icegatheringstatechange', checkState);
+          resolve();
+        }, 10000);
+
+        function checkState() {
+          if (pc.iceGatheringState === 'complete') {
+            clearTimeout(timeoutId);
+            pc.removeEventListener('icegatheringstatechange', checkState);
+            resolve();
+          }
+        }
+
+        pc.addEventListener('icegatheringstatechange', checkState);
+      });
+    }
+
+    /**
+     * Enables or disables the "Go Live" button based on input validity.
+     */
+    function validateInputs() {
+      const hasFile = fileInput.files && fileInput.files.length > 0;
+      const hasPassword = passwordInput.value.trim().length > 0;
+      goLiveBtn.disabled = !(hasFile && hasPassword);
+    }
+
+    fileInput.addEventListener('change', handleFileSelect);
+    passwordInput.addEventListener('input', validateInputs);
+
+    /**
+     * Handles selection of video or image file and converts it into a MediaStream.
+     */
+    async function handleFileSelect() {
+      validateInputs();
+      if (!fileInput.files || fileInput.files.length === 0) return;
+
+      const file = fileInput.files[0];
+
+      // Cleanup existing intervals / streams if re-selecting a file
+      if (imageIntervalId) {
+        clearInterval(imageIntervalId);
+        imageIntervalId = null;
+      }
+      if (localStream) {
+        localStream.getTracks().forEach(track => track.stop());
+      }
+
+      try {
+        if (file.type.startsWith('video/')) {
+          // --- Process Video File ---
+          const objectUrl = URL.createObjectURL(file);
+          hiddenVideo.src = objectUrl;
+          hiddenVideo.loop = true;
+          hiddenVideo.muted = true;
+          await hiddenVideo.play();
+
+          const captureFunc = hiddenVideo.captureStream || hiddenVideo.mozCaptureStream;
+          if (!captureFunc) {
+            throw new Error('Your browser does not support video.captureStream()');
+          }
+          localStream = captureFunc.call(hiddenVideo, 30); // Capture stream at 30 fps
+          previewVideo.srcObject = localStream;
+          updateStatus('Video file loaded successfully.', 'info');
+
+        } else if (file.type.startsWith('image/')) {
+          // --- Process Image File ---
+          const imgBitmap = await createImageBitmap(file);
+          imageCanvas.width = imgBitmap.width;
+          imageCanvas.height = imgBitmap.height;
+          const ctx = imageCanvas.getContext('2d');
+
+          ctx.drawImage(imgBitmap, 0, 0);
+
+          // Periodically redraw canvas to ensure continuous frame capture across browsers
+          imageIntervalId = setInterval(() => {
+            ctx.drawImage(imgBitmap, 0, 0);
+          }, 500);
+
+          const captureFunc = imageCanvas.captureStream || imageCanvas.mozCaptureStream;
+          if (!captureFunc) {
+            throw new Error('Your browser does not support canvas.captureStream()');
+          }
+          localStream = captureFunc.call(imageCanvas, 2); // Capture canvas stream at 2 fps
+          previewVideo.srcObject = localStream;
+          updateStatus('Photo file loaded successfully.', 'info');
+
+        } else {
+          throw new Error('Unsupported file type. Please select a video or image file.');
+        }
+      } catch (err) {
+        console.error('File selection error:', err);
+        updateStatus(`Error loading file: ${err.message}`, 'error');
+      }
+    }
+
+    // --- "Go Live" Workflow ---
+    goLiveBtn.addEventListener('click', async () => {
+      const password = passwordInput.value.trim();
+      if (!localStream || !password) {
+        updateStatus('Please select a file and enter a password.', 'warning');
+        return;
+      }
+
+      // Disable inputs while live
+      goLiveBtn.disabled = true;
+      fileInput.disabled = true;
+      passwordInput.disabled = true;
+
+      try {
+        updateStatus('Computing Room ID...', 'info');
+        roomId = await getRoomId(password);
+
+        updateStatus(`Connecting to MQTT broker (${MQTT_BROKER})...`, 'info');
+        
+        // Connect to public MQTT WebSocket broker
+        mqttClient = mqtt.connect(MQTT_BROKER, { clientId: clientId });
+
+        mqttClient.on('connect', async () => {
+          updateStatus('Connected to broker. Preparing WebRTC connection...', 'info');
+
+          // Subscribe to viewer topic for answer messages
+          const viewerTopic = `myapp/${roomId}/viewer`;
+          mqttClient.subscribe(viewerTopic, (err) => {
+            if (err) {
+              updateStatus(`Failed to subscribe to topic: ${err.message}`, 'error');
+            }
+          });
+
+          // Create RTCPeerConnection with Google STUN server
+          peerConnection = new RTCPeerConnection({
+            iceServers: [{ urls: STUN_SERVER }]
+          });
+
+          // Add all captured tracks from local media stream
+          localStream.getTracks().forEach(track => {
+            peerConnection.addTrack(track, localStream);
+          });
+
+          // Handle ICE connection state changes
+          peerConnection.oniceconnectionstatechange = () => {
+            console.log('ICE Connection State:', peerConnection.iceConnectionState);
+            if (peerConnection.iceConnectionState === 'connected') {
+              updateStatus('WebRTC P2P Connection Established! Streaming media directly to viewer.', 'success');
+            } else if (peerConnection.iceConnectionState === 'disconnected' || peerConnection.iceConnectionState === 'failed') {
+              updateStatus('Viewer disconnected or connection failed.', 'warning');
+            }
+          };
+
+          // Create WebRTC Offer
+          const offer = await peerConnection.createOffer();
+          await peerConnection.setLocalDescription(offer);
+
+          updateStatus('Gathering ICE candidates...', 'info');
+          await waitForIceComplete(peerConnection);
+
+          // Prepare offer payload
+          const streamerTopic = `myapp/${roomId}/streamer`;
+          const payload = JSON.stringify({
+            type: 'offer',
+            from: clientId,
+            sdp: peerConnection.localDescription
+          });
+
+          // Publish retain offer to streamer topic
+          mqttClient.publish(streamerTopic, payload, { retain: true, qos: 1 }, (err) => {
+            if (err) {
+              updateStatus(`Failed to publish offer: ${err.message}`, 'error');
+            } else {
+              updateStatus('Live offer published! Waiting for viewer to connect...', 'warning');
+            }
+          });
+        });
+
+        // Listen for incoming messages on viewer topic
+        mqttClient.on('message', async (topic, message) => {
+          if (topic === `myapp/${roomId}/viewer`) {
+            try {
+              const data = JSON.parse(message.toString());
+              if (data.type === 'answer' && data.sdp) {
+                console.log('Received WebRTC Answer from viewer');
+                if (peerConnection.signalingState !== 'stable') {
+                  await peerConnection.setRemoteDescription(new RTCSessionDescription(data.sdp));
+                  updateStatus('Received answer from viewer. Connecting P2P stream...', 'info');
+                }
+              }
+            } catch (e) {
+              console.error('Failed to parse MQTT message:', e);
+            }
+          }
+        });
+
+        mqttClient.on('error', (err) => {
+          console.error('MQTT Error:', err);
+          updateStatus(`MQTT Broker Error: ${err.message}`, 'error');
+        });
+
+      } catch (err) {
+        console.error('Go Live error:', err);
+        updateStatus(`Failed to start stream: ${err.message}`, 'error');
+        goLiveBtn.disabled = false;
+        fileInput.disabled = false;
+        passwordInput.disabled = false;
+      }
+    });
+  </script>
+</body>
+</html>

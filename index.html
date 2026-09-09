@@ -1,0 +1,206 @@
+<!--
+  index.html - P2P Streaming Landing Page
+  -----------------------------------------------------------------------------
+  This landing page lets the user choose whether they want to stream media
+  (stream.html) or watch an incoming stream (view.html), and redirects them
+  to the appropriate page.
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>P2P Media Streaming - Select Mode</title>
+
+  <style>
+    :root {
+      --bg-color: #0f172a;
+      --card-bg: #1e293b;
+      --card-hover: #334155;
+      --accent-color: #3b82f6;
+      --accent-hover: #2563eb;
+      --streamer-accent: #10b981;
+      --streamer-hover: #059669;
+      --viewer-accent: #8b5cf6;
+      --viewer-hover: #7c3aed;
+      --text-color: #f8fafc;
+      --text-secondary: #94a3b8;
+      --border-color: #334155;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background-color: var(--bg-color);
+      color: var(--text-color);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 2rem 1rem;
+    }
+
+    header {
+      text-align: center;
+      margin-bottom: 2.5rem;
+    }
+
+    header h1 {
+      font-size: 2.25rem;
+      margin-bottom: 0.75rem;
+      color: #fff;
+    }
+
+    header p {
+      color: var(--text-secondary);
+      font-size: 1.05rem;
+      max-width: 500px;
+      margin: 0 auto;
+      line-height: 1.5;
+    }
+
+    .options-grid {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 1.5rem;
+      width: 100%;
+      max-width: 700px;
+    }
+
+    @media (min-width: 640px) {
+      .options-grid {
+        grid-template-columns: 1fr 1fr;
+      }
+    }
+
+    .card {
+      background-color: var(--card-bg);
+      border: 1px solid var(--border-color);
+      border-radius: 16px;
+      padding: 2rem 1.5rem;
+      text-align: center;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: space-between;
+      box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.4);
+      transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+      cursor: pointer;
+      text-decoration: none;
+      color: inherit;
+    }
+
+    .card:hover {
+      transform: translateY(-4px);
+      border-color: var(--accent-color);
+      box-shadow: 0 15px 30px -5px rgba(59, 130, 246, 0.25);
+    }
+
+    .icon-wrapper {
+      width: 64px;
+      height: 64px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin-bottom: 1.25rem;
+      font-size: 1.75rem;
+    }
+
+    .card-streamer .icon-wrapper {
+      background-color: rgba(16, 185, 129, 0.15);
+      color: var(--streamer-accent);
+    }
+
+    .card-viewer .icon-wrapper {
+      background-color: rgba(139, 92, 246, 0.15);
+      color: var(--viewer-accent);
+    }
+
+    .card h2 {
+      font-size: 1.35rem;
+      margin-bottom: 0.75rem;
+      color: #fff;
+    }
+
+    .card p {
+      color: var(--text-secondary);
+      font-size: 0.95rem;
+      line-height: 1.4;
+      margin-bottom: 1.75rem;
+    }
+
+    .btn {
+      width: 100%;
+      padding: 0.85rem;
+      border: none;
+      border-radius: 8px;
+      font-size: 1rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background-color 0.2s;
+    }
+
+    .card-streamer .btn {
+      background-color: var(--streamer-accent);
+      color: white;
+    }
+
+    .card-streamer:hover .btn {
+      background-color: var(--streamer-hover);
+    }
+
+    .card-viewer .btn {
+      background-color: var(--viewer-accent);
+      color: white;
+    }
+
+    .card-viewer:hover .btn {
+      background-color: var(--viewer-hover);
+    }
+
+    footer {
+      margin-top: 3rem;
+      text-align: center;
+      color: var(--text-secondary);
+      font-size: 0.85rem;
+    }
+  </style>
+</head>
+<body>
+
+  <header>
+    <h1>P2P WebRTC Media Stream</h1>
+    <p>Zero-budget, direct browser-to-browser media sharing with MQTT signaling.</p>
+  </header>
+
+  <main class="options-grid">
+    <!-- Streamer Selection Card -->
+    <a href="stream.html" class="card card-streamer">
+      <div class="icon-wrapper">📹</div>
+      <h2>Start Streaming</h2>
+      <p>Share a local video or photo file directly to another user in real-time.</p>
+      <button class="btn" tabindex="-1">Go to Streamer</button>
+    </a>
+
+    <!-- Viewer Selection Card -->
+    <a href="view.html" class="card card-viewer">
+      <div class="icon-wrapper">📺</div>
+      <h2>Watch Stream</h2>
+      <p>Enter a room password to connect and view a live stream directly from a peer.</p>
+      <button class="btn" tabindex="-1">Go to Viewer</button>
+    </a>
+  </main>
+
+  <footer>
+    <p>Serverless P2P Streaming • Hosted on GitHub Pages</p>
+  </footer>
+
+</body>
+</html>
